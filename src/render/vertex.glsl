@@ -1,14 +1,16 @@
 attribute vec4 transforms;
+attribute float slotReady;
 
 // x,z after modulo
 flat varying vec2 bufIdx;
+flat varying float chunkReady;
 varying float chunkMinY;
 varying float chunkMaxY;
 varying vec3 localPos;
 varying mat4 invProjMat;
 varying mat4 invViewMat;
 
-const uint VIEW_DIAMETER = 5u;
+uniform float viewDiameter;
 
 void main() {
 	vec3 posPre = position + vec3(0.5);
@@ -26,8 +28,10 @@ void main() {
 
 	gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 
-	bufIdx.x = float(uint(transforms.x) % VIEW_DIAMETER);
-	bufIdx.y = float(uint(transforms.z) % VIEW_DIAMETER);
+	// bufIdx is atlas slot coords derived from world chunk position.
+	bufIdx.x = mod(transforms.x, viewDiameter);
+	bufIdx.y = mod(transforms.z, viewDiameter);
+	chunkReady = slotReady;
 
 	invProjMat = inverse(projectionMatrix);
 	invViewMat = inverse(modelViewMatrix);

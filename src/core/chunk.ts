@@ -70,4 +70,11 @@ export class Chunk {
 	setMaxY(y: number): void {
 		this.maxY = y;
 	}
+
+	/** Take ownership of a transferred worker heightmap buffer. */
+	adoptHeightMap(heightMap: Float32Array, minY: number, maxY: number): void {
+		this.heightMap = heightMap;
+		this.minY = minY;
+		this.maxY = maxY;
+	}
 }

@@ -1,14 +1,15 @@
 uniform vec2 scrSize;
 uniform sampler2D heightmap;
+uniform float viewDiameter;
 
 flat varying vec2 bufIdx;
+flat varying float chunkReady;
 varying float chunkMinY;
 varying float chunkMaxY;
 varying vec3 localPos;
 varying mat4 invProjMat;
 varying mat4 invViewMat;
 
-const float viewDiameter = 5.0;
 const vec3 DOWN = vec3(0.0, -1.0, 0.0);
 
 struct Ray {
@@ -156,6 +157,10 @@ vec3 heightColor(float h) {
 }
 
 void main() {
+	if (chunkReady < 0.5) {
+		discard;
+	}
+
 	// Keep a defined color before march (helps some drivers); overwritten on hit.
 	vec2 uv = gl_FragCoord.xy / scrSize;
 	uv += bufIdx;
