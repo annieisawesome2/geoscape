@@ -1,10 +1,9 @@
-// cubic chunks, sent to the gpu
-// GridSquare heightmap --> rendered geometry mesh
-
-// CHUNK == COLUMN
-// CUBE == BOUNDING BOX
+/**
+ * A column of terrain: an N×N heightmap with world-space XZ bounds
+ * and a Y range used for the GPU bounding box.
+ */
 export class Chunk {
-	private length: number; // 16
+	private length: number;
 	private heightMap: Float32Array;
 	private minX: number;
 	private maxX: number;
@@ -19,9 +18,9 @@ export class Chunk {
 		this.minZ = minZ;
 		this.maxZ = minZ + length - 1;
 		this.length = length;
-		this.heightMap =  new Float32Array(length * length); // 16x16 grid = 256 height entries
+		this.heightMap = new Float32Array(length * length);
 		this.minY = Infinity;
-        this.maxY = 0;
+		this.maxY = 0;
 	}
 
 	getLength(): number {
@@ -32,57 +31,35 @@ export class Chunk {
 		return this.heightMap;
 	}
 
-	setHeightMap(heightMap: Float32Array) {
-		this.heightMap = heightMap;
-	}
-
 	getHeightAt(x: number, z: number): number {
-		const index = (z - this.minZ) * this.length + (x - this.minX);
-		return this.heightMap[index];
+		return this.heightMap[(z - this.minZ) * this.length + (x - this.minX)];
 	}
 
 	setHeightAt(x: number, z: number, height: number): void {
-		const index = (z - this.minZ) * this.length + (x - this.minX);
-		this.heightMap[index] = height;
+		this.heightMap[(z - this.minZ) * this.length + (x - this.minX)] = height;
 	}
 
 	getMinX(): number {
 		return this.minX;
 	}
 
-	setMinX(x: number) {
-		this.minX = x;
-	}
-
 	getMaxX(): number {
 		return this.maxX;
-	}
-
-	setMaxX(x: number) {
-		this.maxX = x;
 	}
 
 	getMinZ(): number {
 		return this.minZ;
 	}
 
-	setMinZ(z: number) {
-		this.minZ = z;
-	}
-
 	getMaxZ(): number {
 		return this.maxZ;
-	}
-
-	setMaxZ(z: number) {
-		this.maxZ = z;
 	}
 
 	getMinY(): number {
 		return this.minY;
 	}
 
-	setMinY(y: number) {
+	setMinY(y: number): void {
 		this.minY = y;
 	}
 
@@ -90,7 +67,7 @@ export class Chunk {
 		return this.maxY;
 	}
 
-	setMaxY(y: number) {
+	setMaxY(y: number): void {
 		this.maxY = y;
 	}
 }

@@ -9,16 +9,17 @@ varying mat4 invProjMat;
 varying mat4 invViewMat;
 
 const float viewDiameter = 5.0;
+const vec3 DOWN = vec3(0.0, -1.0, 0.0);
 
 struct Ray {
 	vec3 pos;
 	vec3 dir;
 };
 
-// pos's value is undefined when hit is false
+// pos is undefined when hit is false
 struct Hit {
 	bool hit;
-	ivec3 pos;
+	vec3 pos;
 	uint steps;
 };
 
@@ -26,193 +27,152 @@ Ray getPrimaryRay() {
 	vec2 uv = (gl_FragCoord.xy / scrSize) * 2.0 - 1.0;
 	vec4 targ = invProjMat * vec4(uv, 1.0, 1.0);
 	vec4 dir = invViewMat * vec4(normalize(targ.xyz / targ.w), 0.0);
-	return Ray(localPos, dir.xyz);
+	return Ray(localPos, normalize(dir.xyz));
 }
 
-bool outOfChunk(ivec3 pos, int ofs) {
-	int lo = -1 + ofs;
-	int hi = 32 - ofs;
-	return pos.x < lo
-	|| pos.x > hi
-	|| pos.z < lo
-	|| pos.z > hi
-	|| float(pos.y) < chunkMinY
-	|| float(pos.y) > chunkMaxY;
+bool outOfChunk(vec3 pos) {
+	return pos.x < 0.0
+		|| pos.x > 1.0
+		|| pos.z < 0.0
+		|| pos.z > 1.0
+		|| pos.y < chunkMinY
+		|| pos.y > chunkMaxY;
 }
 
-const float TEXELS_PER_UNIT = 32.0;
-const float UNITS_PER_TEXEL = 1.0 / TEXELS_PER_UNIT;
-const uint MAX_STEPS = 512u;
-const float EPS = 1e-6; // adjust if your world scale is large/small
-
+// xz in [0, 1] within the chunk
 float getHeight(vec2 xz) {
 	xz += bufIdx;
 	xz /= viewDiameter;
 	return texture(heightmap, xz).r;
 }
 
-float getHeightFromCell(ivec2 cell) {
-    vec2 uv = (vec2(cell) + 0.5) / float(HEIGHTMAP_SIZE);
-    return texture(heightmap, uv).r;
+bool sampleHeight(vec3 pos) {
+	vec2 uv = (floor(pos.xz * 32.0) + 0.5) / 32.0;
+	uv += bufIdx;
+	uv /= viewDiameter;
+	float height = texture(heightmap, uv).r;
+	return height > pos.y + 1e-4;
 }
 
-Hit march(Ray primary) {
-	// Convert ray to texel space
-	vec3 ro_tex = primary.pos * TEXELS_PER_UNIT;
-	vec3 rd_tex = normalize(primary.dir) * TEXELS_PER_UNIT;
+Hit marchXZ(Ray primary) {
+	vec3 P = primary.pos;
+	vec3 D = primary.dir;
 
-	// Current voxel in texel space (x,z)
-	ivec2 pos = ivec2(floor(ro_tex.x), floor(ro_tex.z));
+	vec2 pos2 = P.xz;
+	vec2 dir2 = D.xz;
 
-	// Step direction for DDA
-	ivec2 step;
-	step.x = rd_tex.x > 0.0 ? 1 : -1;
-	step.y = rd_tex.z > 0.0 ? 1 : -1;
+	// Rays with near-zero XZ direction (straight up/down)
+	if (abs(dir2.x) < 1e-8 && abs(dir2.y) < 1e-8) {
+		return Hit(false, vec3(0.0), 0u);
+	}
 
-	// Compute tMax and tDelta for DDA
-	vec2 nextBorder;
-	nextBorder.x = (step.x > 0) ? (float(pos.x) + 1.0) : float(pos.x);
-	nextBorder.y = (step.y > 0) ? (float(pos.y) + 1.0) : float(pos.y);
+	vec2 invDir2 = 1.0 / max(abs(dir2), vec2(1e-8));
+	vec2 step2 = sign(dir2);
 
-	vec2 tMax;
-	tMax.x = (nextBorder.x - ro_tex.x) / rd_tex.x;
-	tMax.y = (nextBorder.y - ro_tex.z) / rd_tex.z;
+	vec2 voxelPos2 = pos2 * 32.0;
+	vec2 voxelBase2 = floor(voxelPos2);
+	vec2 voxelFrac2 = voxelPos2 - voxelBase2;
 
-	vec2 tDelta;
-	tDelta.x = 1.0 / abs(rd_tex.x);
-	tDelta.y = 1.0 / abs(rd_tex.z);
+	vec2 tDelta2 = invDir2 / 32.0;
+	vec2 tMax2;
+	tMax2.x = (step2.x > 0.0 ? 1.0 - voxelFrac2.x : voxelFrac2.x) * invDir2.x / 32.0;
+	tMax2.y = (step2.y > 0.0 ? 1.0 - voxelFrac2.y : voxelFrac2.y) * invDir2.y / 32.0;
 
-	// March through heightmap grid
-	for (uint i = 0u; i < 64u; ++i) {
-		if (outOfChunk(pos + step, 0)) { break; }
+	float t = 0.0;
 
-		// sample at cell center, and add a tiny epsilon to the float comparison
-		float h = getHeightFromCell(ivec2(pos.x, pos.y)); // should sample at center
-		if (h > float(pos.y) + 1e-5) {
-			return Hit(true, ivec3(pos.x, 0, pos.y), i);
+	for (uint i = 0u; i < 128u; i++) {
+		vec3 currPos = P + t * D;
+
+		if (outOfChunk(currPos)) break;
+
+		float h = getHeight(currPos.xz);
+		if (currPos.y <= h + 1e-4) {
+			return Hit(true, currPos, i);
 		}
 
-		// find smallest tMax
-		float minT = min(min(tMax.x, tMax.y), tMax.z);
-
-		// step all axes that are (within EPS) equal to the minimum
-		// this handles exact edge/vertex hits by advancing multiple axes
-		bool steppedX = false;
-		bool steppedY = false;
-		bool steppedZ = false;
-
-		if (abs(tMax.x - minT) <= EPS) {
-			tMax.x += tDelta.x;
-			pos.x += step.x;
-			steppedX = true;
-		}
-		if (abs(tMax.y - minT) <= EPS) {
-			tMax.y += tDelta.y;
-			pos.y += step.y;
-			steppedY = true;
-		}
-		if (abs(tMax.z - minT) <= EPS) {
-			tMax.z += tDelta.z;
-			pos.z += step.z;
-			steppedZ = true;
-		}
-
-		// sanity: if none stepped because of missed epsilon, step the smallest axis
-		if (!steppedX && !steppedY && !steppedZ) {
-			if (tMax.x < tMax.y) {
-				if (tMax.x < tMax.z) {
-					tMax.x += tDelta.x; pos.x += step.x;
-				} else {
-					tMax.z += tDelta.z; pos.z += step.z;
-				}
-			} else {
-				if (tMax.y < tMax.z) {
-					tMax.y += tDelta.y; pos.y += step.y;
-				} else {
-					tMax.z += tDelta.z; pos.z += step.z;
-				}
-			}
+		if (tMax2.x < tMax2.y) {
+			t = tMax2.x;
+			tMax2.x += tDelta2.x;
+		} else {
+			t = tMax2.y;
+			tMax2.y += tDelta2.y;
 		}
 	}
 
-	// No hit found
-	return Hit(false, ivec3(pos.x, 0, pos.y), MAX_STEPS);
+	return Hit(false, vec3(0.0), 0u);
 }
 
+Hit march(Ray primary) {
+	vec3 P = primary.pos;
+	vec3 D = primary.dir;
 
-// Hit march(Ray primary) {
-// 	vec3 dir = primary.dir;
-// 	vec3 sgn = sign(dir);
-// 	vec3 posf = floor(primary.pos);
-// 	ivec3 step = ivec3(sgn);
-// 	ivec3 pos = ivec3(posf);
-// 	vec3 dt = vec3(
-// 		(abs(dir.x) > 1e-8) ? abs(1.0 / dir.x) : 1e30,
-// 		(abs(dir.y) > 1e-8) ? abs(1.0 / dir.y) : 1e30,
-// 		(abs(dir.z) > 1e-8) ? abs(1.0 / dir.z) : 1e30
-// 	);
-// 	// vec3 tSide = ((sgn * (posf - primary.pos)) + (sgn * 0.5) + 0.5) * dt;
-// 	vec3 nextVoxelBorder;
-// 	nextVoxelBorder.x = (step.x > 0) ? (posf.x + 1.0) : posf.x; // posf is floor(primary.pos)
-// 	nextVoxelBorder.y = (step.y > 0) ? (posf.y + 1.0) : posf.y;
-// 	nextVoxelBorder.z = (step.z > 0) ? (posf.z + 1.0) : posf.z;
-//
-// 	vec3 tSide = vec3(
-// 			(abs(dir.x) > 1e-8) ? ((nextVoxelBorder.x - primary.pos.x) / dir.x) : 1e30,
-// 			(abs(dir.y) > 1e-8) ? ((nextVoxelBorder.y - primary.pos.y) / dir.y) : 1e30,
-// 			(abs(dir.z) > 1e-8) ? ((nextVoxelBorder.z - primary.pos.z) / dir.z) : 1e30
-// 	);
-//
-// 	bvec3 mask;
-// 	uint i;
-//
-// 	for (i = 0u; i < 64u; i++) {
-// 		if (outOfChunk(pos + step, 0)) {
-// 			break;
-// 		}
-// 		if (getHeight(vec2(pos.xz)) > float(pos.y) && !outOfChunk(pos, 1)) {
-// 			return Hit(true, pos, i);
-// 		}
-// 		if (tSide.x < tSide.y) {
-// 			if (tSide.x < tSide.z) {
-// 				tSide.x += dt.x;
-// 				pos.x += step.x;
-// 				mask = bvec3(true, false, false);
-// 			} else {
-// 				tSide.z += dt.z;
-// 				pos.z += step.z;
-// 				mask = bvec3(false, false, true);
-// 			}
-// 		} else {
-// 			if (tSide.y < tSide.z) {
-// 				tSide.y += dt.y;
-// 				pos.y += step.y;
-// 				mask = bvec3(false, true, false);
-// 			} else {
-// 				tSide.z += dt.z;
-// 				pos.z += step.z;
-// 				mask = bvec3(false, false, true);
-// 			}
-// 		}
-// 	}
-//
-// 	return Hit(false, pos, i);
-// }
+	vec3 voxelFrac = fract(P * 32.0);
+	vec3 invD = 1.0 / max(abs(D), vec3(1e-8));
+	vec3 tDelta = invD / 32.0;
+	vec3 stepDir = sign(D);
+
+	vec3 tMax;
+	tMax.x = (stepDir.x > 0.0 ? 1.0 - voxelFrac.x : voxelFrac.x) * invD.x / 32.0;
+	tMax.y = (stepDir.y > 0.0 ? 1.0 - voxelFrac.y : voxelFrac.y) * invD.y / 32.0;
+	tMax.z = (stepDir.z > 0.0 ? 1.0 - voxelFrac.z : voxelFrac.z) * invD.z / 32.0;
+
+	for (uint i = 0u; i < 64u; i++) {
+		if (outOfChunk(P)) break;
+		if (sampleHeight(P)) return Hit(true, P, i);
+
+		if (tMax.x < tMax.y && tMax.x < tMax.z) {
+			P.x += stepDir.x / 32.0;
+			tMax.x += tDelta.x;
+		} else if (tMax.y < tMax.z) {
+			P.y += stepDir.y / 32.0;
+			tMax.y += tDelta.y;
+		} else {
+			P.z += stepDir.z / 32.0;
+			tMax.z += tDelta.z;
+		}
+	}
+
+	return Hit(false, P, 0u);
+}
+
+vec3 heightColor(float h) {
+	if (h < 0.3) {
+		return mix(vec3(0.2, 0.1, 0.05), vec3(0.33, 0.27, 0.13), h / 0.3);
+	} else if (h < 0.5) {
+		return mix(vec3(0.33, 0.27, 0.13), vec3(0.1, 0.2, 0.1), (h - 0.3) / 0.2);
+	} else if (h < 0.65) {
+		return mix(vec3(0.1, 0.2, 0.1), vec3(0.0, 0.4, 0.0), (h - 0.5) / 0.15);
+	} else if (h < 0.8) {
+		return mix(vec3(0.0, 0.4, 0.0), vec3(0.0, 0.278, 0.0), (h - 0.65) / 0.15);
+	} else {
+		return mix(vec3(0.0, 0.278, 0.0), vec3(0.2, 0.6, 0.2), (h - 0.8) / 0.2);
+	}
+}
 
 void main() {
+	// Keep a defined color before march (helps some drivers); overwritten on hit.
 	vec2 uv = gl_FragCoord.xy / scrSize;
 	uv += bufIdx;
 	uv /= viewDiameter;
 	gl_FragColor = vec4(vec3(texture(heightmap, uv).r - 2.0), 1.0);
 
 	Ray ray = getPrimaryRay();
-	Hit hit = march(ray);
+	Hit hit;
+	if (dot(ray.dir, DOWN) >= sqrt(2.0) / 2.0) {
+		hit = marchXZ(ray);
+	} else {
+		hit = march(ray);
+	}
 
 	if (hit.hit) {
-		gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
-		// gl_FragColor = vec4(vec3(float(hit.steps) / float(16)) * 2.0, 1.0);
+		float normY = clamp((hit.pos.y - chunkMinY) / (chunkMaxY - chunkMinY), 0.0, 1.0);
+		vec3 baseColor = heightColor(normY);
+		vec3 lightDir = normalize(vec3(0.5, 2.0, 0.5));
+		float lightIntensity = clamp(dot(normalize(vec3(0.5, 1.0, 0.5)), lightDir), 0.0, 1.0);
+		vec3 shadowTint = vec3(0.2, 0.5, 0.1);
+		vec3 finalColor = mix(shadowTint, baseColor, lightIntensity);
+		gl_FragColor = vec4(finalColor, 1.0);
 	} else {
-		// gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 		discard;
 	}
 }

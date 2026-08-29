@@ -1,35 +1,41 @@
 import { Chunk } from './chunk';
-import { GivenGenerator } from '../core/given_generator';
+import { GivenGenerator } from './given_generator';
 
-// manages loading/unloading and querying visible chunks
+/** Owns a square grid of chunks and serves height / AABB queries for rendering. */
 export class ChunkManager {
-    private numChunks: number; // width/height of the chunk array
-    private array_chunks: Chunk[]; // the square array of chunks
-    private numPixels;
-    
-    constructor(dim: number, pixels: number){
-        let generator = new GivenGenerator();
-        this.numChunks = dim;
-        this.numPixels = pixels;
-        this.array_chunks = new Array(this.numChunks**2);
-        for (let i = 0; i < dim*dim; i++){
-            this.array_chunks[i] = new Chunk((i%dim)*pixels, (Math.floor(i/dim))*pixels, pixels)
-            generator.generateHeightMapForChunk(this.array_chunks[i]);
-        }
-    } //build a square array side length numChunks
+	private readonly numChunks: number;
+	private readonly numPixels: number;
+	private readonly chunks: Chunk[];
 
-    getChunkData(chunkx: number, chunkz: number): Float32Array {
-        return this.array_chunks[chunkz*this.numChunks + chunkx].getHeightMap();
-    }
+	constructor(dim: number, pixels: number) {
+		const generator = new GivenGenerator();
+		this.numChunks = dim;
+		this.numPixels = pixels;
+		this.chunks = new Array(dim * dim);
 
-    getMinY(chunkx: number, chunkz: number): number {
-        return this.array_chunks[chunkz*this.numChunks + chunkx].getMinY()/this.numPixels;
-    } // get the miny at chunkx and chunk z
-    // getmaxy(chunkx,chunkz) // get the maxy at chunkx and chunkz
-    getBBHeight(chunkx: number, chunkz: number): number {
-        
-        return (this.array_chunks[chunkz*this.numChunks + chunkx].getMaxY() - this.array_chunks[chunkz*this.numChunks + chunkx].getMinY() +  1);
-    } // get the height of the chunk at x and z
-    
-    // getchunkdata(chunkx, chunkz) //get the data 
+		for (let i = 0; i < dim * dim; i++) {
+			const x = (i % dim) * pixels;
+			const z = Math.floor(i / dim) * pixels;
+			const chunk = new Chunk(x, z, pixels);
+			generator.generateHeightMapForChunk(chunk);
+			this.chunks[i] = chunk;
+		}
+	}
+
+	private chunkAt(chunkX: number, chunkZ: number): Chunk {
+		return this.chunks[chunkZ * this.numChunks + chunkX];
+	}
+
+	getChunkData(chunkX: number, chunkZ: number): Float32Array {
+		return this.chunkAt(chunkX, chunkZ).getHeightMap();
+	}
+
+	getMinY(chunkX: number, chunkZ: number): number {
+		return this.chunkAt(chunkX, chunkZ).getMinY() / this.numPixels;
+	}
+
+	getBBHeight(chunkX: number, chunkZ: number): number {
+		const chunk = this.chunkAt(chunkX, chunkZ);
+		return chunk.getMaxY() - chunk.getMinY() + 1;
+	}
 }
