@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { Input } from '../input';
 import { ChunkManager } from '../core/chunkManager';
-import { MovableCamera } from './camera';
+import { OrbitCamera } from './camera';
 import vertexShader from './vertex.glsl?raw';
 import fragmentShader from './fragment.glsl?raw';
 
@@ -14,10 +13,8 @@ const SKY_COLOR = 0x87cefa;
 
 export class Renderer {
 	private readonly webgl = new THREE.WebGLRenderer();
-	private readonly clock = new THREE.Clock();
 	private readonly scene = new THREE.Scene();
-	private readonly input: Input;
-	private readonly camera: MovableCamera;
+	private readonly camera: OrbitCamera;
 
 	private readonly chunks = new ChunkManager(VIEW_DIAMETER, CHUNK_SIZE);
 	private readonly bbTransforms = new Float32Array(VIEW_DIAMETER ** 2 * 4);
@@ -43,11 +40,8 @@ export class Renderer {
 			VIEW_DIAMETER ** 2,
 		);
 
-		this.input = new Input(this.webgl.domElement);
-		this.camera = new MovableCamera(this.input);
-		this.input.registerMouseCb((evt) => this.camera.tickMouse(evt));
-
 		this.setupCanvas();
+		this.camera = new OrbitCamera(this.webgl.domElement);
 		this.resize();
 		this.setupHeightmap();
 		this.setupInstances();
@@ -129,8 +123,7 @@ export class Renderer {
 	}
 
 	private tick(): void {
-		const dt = this.clock.getDelta();
-		this.camera.tick(dt);
+		this.camera.tick();
 		this.webgl.render(this.scene, this.camera.inner);
 	}
 }

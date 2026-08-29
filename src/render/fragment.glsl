@@ -61,8 +61,14 @@ Hit marchXZ(Ray primary) {
 	vec2 pos2 = P.xz;
 	vec2 dir2 = D.xz;
 
-	// Rays with near-zero XZ direction (straight up/down)
+	// Near-vertical rays: sample height directly instead of missing.
 	if (abs(dir2.x) < 1e-8 && abs(dir2.y) < 1e-8) {
+		if (D.y < 0.0 && P.x >= 0.0 && P.x <= 1.0 && P.z >= 0.0 && P.z <= 1.0) {
+			float h = getHeight(P.xz);
+			if (P.y >= h - 1e-4) {
+				return Hit(true, vec3(P.x, h, P.z), 0u);
+			}
+		}
 		return Hit(false, vec3(0.0), 0u);
 	}
 

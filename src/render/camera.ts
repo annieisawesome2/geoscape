@@ -1,27 +1,32 @@
-import type { Input } from '../input';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-const UP_VEC = new THREE.Vector3(0.0, 1.0, 0.0);
-const ROT_SPEED = 0.1;
-const MOVE_SPEED = 5.0;
+/** Center of the 5×5 chunk grid in world units */
+const TERRAIN_CENTER = new THREE.Vector3(2.5, 0.5, 2.5);
 
-export class MovableCamera {
+export class OrbitCamera {
 	readonly inner: THREE.PerspectiveCamera;
-	#dir = new THREE.Vector3();
-	#dirR = new THREE.Vector3();
-	#input: Input;
-	#lastDt = 0;
+	readonly controls: OrbitControls;
 
-	constructor(input: Input) {
+	constructor(canvas: HTMLCanvasElement) {
 		this.inner = new THREE.PerspectiveCamera(
 			75,
 			window.innerWidth / window.innerHeight,
 			0.1,
 			2000,
 		);
-		this.inner.getWorldDirection(this.#dir);
-		this.inner.position.set(2, 0, 10);
-		this.#input = input;
+		this.inner.position.set(2.5, 8, 10);
+
+		this.controls = new OrbitControls(this.inner, canvas);
+		this.controls.target.copy(TERRAIN_CENTER);
+		this.controls.enableDamping = true;
+		this.controls.dampingFactor = 0.08;
+		this.controls.rotateSpeed = 0.7;
+		this.controls.panSpeed = 0.8;
+		this.controls.minDistance = 2;
+		this.controls.maxDistance = 40;
+		this.controls.maxPolarAngle = Math.PI / 2 - 0.05;
+		this.controls.update();
 
 		window.addEventListener('resize', () => {
 			this.inner.aspect = window.innerWidth / window.innerHeight;
@@ -29,31 +34,7 @@ export class MovableCamera {
 		});
 	}
 
-	#move(v: THREE.Vector3, scale: number): void {
-		this.inner.position.addScaledVector(v, MOVE_SPEED * scale);
-	}
-
-	#updateView(): void {
-		this.inner.updateMatrix();
-		this.inner.getWorldDirection(this.#dir);
-		this.#dirR.copy(UP_VEC).cross(this.#dir);
-	}
-
-	/** Separate from the key map to reduce look stutter. */
-	tickMouse(evt: PointerEvent): void {
-		this.inner.rotateY(evt.movementX * ROT_SPEED * this.#lastDt);
-		this.inner.rotateX(evt.movementY * ROT_SPEED * this.#lastDt);
-		// TODO: lock roll so we only pitch/yaw
-	}
-
-	tick(dt: number): void {
-		this.#lastDt = dt;
-		if (this.#input.isPressed('KeyW')) this.#move(this.#dir, dt);
-		if (this.#input.isPressed('KeyS')) this.#move(this.#dir, -dt);
-		if (this.#input.isPressed('KeyA')) this.#move(this.#dirR, dt);
-		if (this.#input.isPressed('KeyD')) this.#move(this.#dirR, -dt);
-		if (this.#input.isPressed('KeyE')) this.#move(UP_VEC, dt);
-		if (this.#input.isPressed('KeyQ')) this.#move(UP_VEC, -dt);
-		this.#updateView();
+	tick(): void {
+		this.controls.update();
 	}
 }
